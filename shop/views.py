@@ -74,26 +74,50 @@ def remove_from_cart(request, product_id):
 
 
 
-import openai
-from django.conf import settings
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-import json
+# views.py
+import google.generativeai as genai
+from django.shortcuts import render
+from .models import Product  # assuming you have a Product model
 
-openai.api_key = settings.OPENAI_API_KEY
+# Load API key
+genai.configure(api_key='AIzaSyCyuWDy2yWInRyjbFTyop6bA9UxZ7Tc7GI')
 
-@csrf_exempt
-def ask_ai(request):
-    if request.method == "POST":
-        data = json.loads(request.body)
-        question = data.get("question", "")
+def ai_recommendation(request):
+    products = Product.objects.all()
+    product_names = ', '.join([p.name for p in products]) if products else "No products available"
+    
+    prompt = f"Recommend top 3 products from the following: {product_names}"
 
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": question}]
-            )
-            answer = response['choices'][0]['message']['content'].strip()
-            return JsonResponse({"answer": answer})
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
+    try:
+        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
+        response = model.generate_content(prompt)
+        recommendations = response.text
+    except Exception as e:
+        recommendations = f"AI Error: {str(e)}"
+
+    return render(request, 'shop/recommend.html', {
+        'recommendations': recommendations,
+        'products': products
+    })
+
+from django.shortcuts import render, get_object_or_404, redirect
+from .models import Product, Review  # assuming you have Review model
+
+def product_detail(request, product_id):
+    product = get_object_or_404(Product, id=product_id)
+    
+    if request.method == 'POST' and 'review_submit' in request.POST:
+        name = request.POST.get('name')
+        comment = request.POST.get('comment')
+        if name and comment:
+            Review.objects.create(product=product, reviewer_name=name, comment=comment)
+            return redirect('product_detail', product_id=product.id)
+    
+    reviews = product.reviews.all().order_by('-created_at')
+
+    return render(request, 'shop/product_detail.html', {
+        'product': product,
+        'reviews': reviews,
+        # include other context like cart_item_count if needed
+    })
+
